@@ -1,0 +1,2054 @@
+﻿#+TITLE: Martins Emacs Start
+#+OPTIONS: html-postamble:nil html-preamble:t tex:t
+#+OPTIONS: toc:3 num:nil ^:nil creator:nil timestamp:nil
+#+SETUPFILE: config/org/notes-style.org
+* Introduction
+  :PROPERTIES:
+  :CUSTOM_ID: introduction
+  :END:
+  This is an attempt to migrate my .emacs file into a literate programming org
+  version. The main reason is that I hope for better folding and organisation.
+
+  The org-file sets the necessary export options for a nice but not chatty html export.
+
+  Infos on the different packages and settings are in =LOGBOOK= drawers within each
+  entry. Reminder: new ones are added via =C-c C-z=.
+
+  The startup is divided into 4 files:
+  - =init.el= which starts the org-babel magic
+  - =emacs.org= this file which contains the most part
+  - =local.el= which contains local or sensitive details
+  - =custom.el= which contains everything from M-x customize
+
+  The =init.el= file is where everything begins. It is loaded automatically by Emacs on
+  startup, It prepares the repositories I use and the package system to load all packages
+  the further startup depends on. Finally it set ups the highly useful =no-littering=
+  package.
+
+ I aim to use =use-package= as much as possible because I like the clean code and the fast
+startup. Some files I use are not available on MELPA. Those are in a sub-directory of my
+user directory creatively called “lisp”.
+
+I borrowed a lot from other people’s files, but only recently started no note where things
+come from.
+* Basics
+** Load the local file
+    This file contains data that is eithersensitive so I don't want to share it and also
+    everything system-dependent. Check the existence of such a file before loading so as
+    not to cause errors.
+#+BEGIN_SRC emacs-lisp
+(let
+((local-file (expand-file-name "local.el" user-emacs-directory)))
+(when (file-exists-p local-file)
+(load local-file 'noerror)))
+#+END_SRC
+** Garbage-collect on focus-out, Emacs /should/ feel snappier.
+    :LOGBOOK:
+    - Note taken on [2018-04-15 So 12:49] \\
+      From Manish Parashar
+    :END:
+    #+begin_src emacs-lisp
+    (add-hook 'focus-out-hook #'garbage-collect)
+    #+end_src
+** Backup
+    :LOGBOOK:
+    - Note taken on [2018-04-29 So 20:40] \\
+      Trying ideas from https://www.emacswiki.org/emacs/BackupDirectory
+    :END:
+I don't want to see trailing whitespace. Adding this as a general =before-save-hook= does the job
+automatically upon save. Backups should be more than one and go in a dedicated directory
+    #+begin_src emacs-lisp
+      (use-package files
+        :ensure nil
+        :hook
+        (before-save . delete-trailing-whitespace)
+        :custom
+        ;; backup settings
+        (backup-by-copying t "don't clobber symlinks")
+        (delete-old-versions t)
+        (kept-new-versions 6)
+        (kept-old-versions 2)
+        (version-control t "use versioned backups")
+        :config
+        (setq confirm-kill-processes nil))
+    #+end_src
+* General configuration
+** ACE-Windows
+    :LOGBOOK:
+    - Note taken on [2018-05-24 Do 21:22] \\
+      Von https://www.suenkler.info/notes/emacs-config/
+    :END:
+    This package allows for easy window switching
+    #+BEGIN_SRC emacs-lisp
+    (use-package ace-window
+    :ensure t
+    :init
+    (progn
+    (global-set-key [remap other-window] 'ace-window)
+    (custom-set-faces
+    '(aw-leading-char-face
+    ((t (:inherit ace-jump-face-foreground :height 3.0)))))))
+    #+END_SRC
+** Aliases
+    [2013-09-03 Di 23:45] I learned from https://sites.google.com/site/steveyegge2/effective-emacs  how to add
+    aliases which seems handy. The first entry is just a sample to remind me of the syntax
+    #+begin_src emacs-lisp
+    (defalias 'qrr 'query-replace-regexp)
+    #+end_src
+** Ansi-Term
+:PROPERTIES:
+:CREATED:  [2019-06-01 Sa 14:05]
+:END:
+I just found =ansi-term= which is a much nicer shell in Emacs. The following code from
+https://echosa.github.io/blog/2012/06/06/improving-ansi-term/ removes the buffer after
+exiting the shell.
+#+begin_src emacs-lisp
+(defadvice term-sentinel (around my-advice-term-sentinel (proc msg))
+  (if (memq (process-status proc) '(signal exit))
+      (let ((buffer (process-buffer proc)))
+        ad-do-it
+        (kill-buffer buffer))
+    ad-do-it))
+(ad-activate 'term-sentinel)
+#+end_src
+** Appointments
+I start to use the appointment system as well, so I need to activate it. I don't want to
+be reminded more then twice before the appointment itself. I also want the diary entries
+sorted.
+#+BEGIN_SRC emacs-lisp
+(appt-activate 1)
+(setq appt-message-warning-time 10
+appt-display-interval 5)
+(add-hook 'diary-list-entries-hook 'diary-sort-entries t)
+#+END_SRC
+** Auto-revert
+No messages for =auto-revert=
+#+begin_src emacs-lisp
+  (use-package autorevert
+  :ensure nil
+  :config
+   (setq auto-revert-verbose nil
+         global-auto-revert-mode t
+         global-auto-revert-non-file-buffers t))
+#+end_src
+** Auto-save
+:LOGBOOK:
+- Note taken on [2019-05-12 So 16:43] \\
+  Changed lisp code as recommendedon no-litering site
+- Note taken on [2018-07-19 Do 18:49] \\
+  Added the code for =auto-save-file-name-transforms=
+:END:
+=no-littering= seems not to include this so I'll add it here
+#+BEGIN_SRC emacs-lisp
+(setq auto-save-file-name-transforms
+      `((".*" ,(no-littering-expand-var-file-name "auto-save/") t)))
+
+#+END_SRC
+
+Emacs 26.1 has builtin auto-save. I'll use that now with auto-saving once a minute rather
+than the default 5 seconds.
+#+BEGIN_SRC emacs-lisp
+(setq auto-save-visited-interval 60)
+(auto-save-visited-mode 1)
+#+END_SRC
+** Calendar
+    :LOGBOOK:
+    - Note taken on [2018-05-13 So 21:44] \\
+      It seems =filter-visible-calendar-holidays= is replaced by =holiday-filter-visible-calendar=
+    - Note taken on [2014-10-18 Sa 21:37] \\
+      variable names change for holiday: all need to start with 'holiday' now
+    :END:
+    I prefer German names and local holidays
+
+    #+begin_src emacs-lisp
+      (setq calendar-date-style 'european
+            calendar-week-start-day 1
+            calendar-latitude [48 9 north]
+            calendar-longitude [11 34 east]
+            calendar-mark-holidays-flag t
+            calendar-time-display-form
+            '(24-hours ":" minutes
+                       (if time-zone " (")
+                       time-zone
+                       (if time-zone ")"))
+            calendar-day-name-array ["Sonntag" "Montag" "Dienstag" "Mittwoch"
+                                     "Donnerstag" "Freitag" "Samstag"]
+            calendar-month-name-array ["Januar" "Februar" "März" "April" "Mai"
+                                       "Juni" "Juli" "August" "September"
+                                       "Oktober" "November" "Dezember"]
+            solar-n-hemi-seasons
+            '("Frühlingsanfang" "Sommeranfang" "Herbstanfang" "Winteranfang")
+            holiday-general-holidays
+            '((holiday-fixed 1 1 "Neujahr")
+              (holiday-fixed 5 1 "1. Mai")
+              (holiday-float 5 0 2 "Muttertag")
+              (holiday-fixed 10 3 "Tag der Deutschen Einheit"))
+            holiday-christian-holidays
+            '(
+              (holiday-float 12 0 -4 "1. Advent" 24)
+              (holiday-float 12 0 -3 "2. Advent" 24)
+              (holiday-float 12 0 -2 "3. Advent" 24)
+              (holiday-float 12 0 -1 "4. Advent" 24)
+              (holiday-fixed 12 25 "1. Weihnachtstag")
+              (holiday-fixed 12 26 "2. Weihnachtstag")
+              (holiday-fixed 1 6 "Heilige Drei Könige")
+              (holiday-easter-etc -48 "Rosenmontag")
+              (holiday-easter-etc -2 "Karfreitag")
+              (holiday-easter-etc  0 "Ostersonntag")
+              (holiday-easter-etc +1 "Ostermontag")
+              (holiday-easter-etc +39 "Christi Himmelfahrt")
+              (holiday-easter-etc +49 "Pfingstsonntag")
+              (holiday-easter-etc +50 "Pfingstmontag")
+              (holiday-easter-etc +60 "Fronleichnam")
+              (holiday-fixed 8 15 "Mariä Himmelfahrt")
+              (holiday-fixed 11 1 "Allerheiligen")
+              (holiday-float 11 3 1 "Buß- und Bettag" 16)
+              (holiday-float 11 0 1 "Totensonntag" 20)
+              (holiday-fixed 12  8 "Mariä Empfängnis"))
+            calendar-holidays
+            (append holiday-general-holidays holiday-local-holidays holiday-other-holidays
+                    holiday-christian-holidays holiday-solar-holidays))
+    #+end_src
+    Better views of calendar from [[https://github.com/seagle0128/.emacs.d][GitHub - seagle0128/.emacs.d: Centaur Emacs - A Fancy and Fast Emacs Configur...]]
+#+begin_src emacs-lisp
+  (use-package calfw
+    :disabled
+    :commands cfw:open-calendar-buffer
+    :bind ("<C-f12>" . open-calendar)
+    :init
+    (use-package calfw-org
+      :commands (cfw:open-org-calendar cfw:org-create-source))
+
+    (use-package calfw-cal
+      :commands (cfw:open-diary-calendar cfw:cal-create-source))
+
+    (use-package calfw-ical
+      :commands (cfw:open-ical-calendar cfw:ical-create-source))
+
+    (defun open-calendar ()
+      "Open calendar."
+      (interactive)
+      (cfw:open-calendar-buffer
+                 :contents-sources
+                 (list
+                  (cfw:org-create-source "Gray") ; org source
+                  (cfw:cal-create-source "Orange") ; diary source
+                  ))))
+#+end_src
+** Dashboard
+    :LOGBOOK:
+    - Note taken on [2018-05-19 Sa 18:22] \\
+      Nice idea but not really useful.
+    :END:
+    A nice dashboard when Emacs is started. Parts of the config taken from https://github.com/michaeltd/.emacs.d
+    #+begin_src emacs-lisp
+      (use-package dashboard
+        :config
+        (dashboard-setup-startup-hook)
+        (setq initial-buffer-choice (lambda () (get-buffer "*dashboard*"))
+              dashboard-center-content t
+              dashboard-set-heading-icons t
+              dashboard-set-file-icons t
+              dashboard-set-init-info t
+              dashboard-startup-banner 'official
+              dashboard-banner-logo-title (message "Emacs ready in %s with %d garbage collections."
+                                                   (format "%.2f seconds"
+                                                           (float-time
+                                                            (time-subtract after-init-time before-init-time)))
+                                                   gcs-done)
+              dashboard-footer-icon (all-the-icons-octicon "dashboard"
+                                                           :height 1.1
+                                                           :v-adjust -0.05
+                                                           :face 'font-lock-keyword-face)
+              dashboard-items '((recents  . 10)
+                                (bookmarks . 5)
+                                (agenda . 5))
+              show-week-agenda-p t)
+        (dashboard-modify-heading-icons '((recents . "file-text")
+                                          (bookmarks . "book")))
+        :demand t)
+    #+end_src
+** date2name
+    :LOGBOOK:
+    - Note taken on [2019-07-07 So 11:59] \\
+      It's now in MELPA
+- Note taken on [2018-07-20 Fr 08:48] \\
+  From Karl Voit's .emacs
+:END:
+https://github.com/DerBeutlin/date2name.el provides =date2name-dired-add-date-to-name()=
+which is an Elisp-native re-implementation of [[https://github.com/novoid/date2name][date2name]]:
+
+#+BEGIN_SRC emacs-lisp
+  (use-package date2name
+    :demand t)
+#+END_SRC
+** Delete duplicate entries of the history of the minibuffer
+:LOGBOOK:
+- Note taken on [2018-07-19 Do 18:37] \\
+  From Karl Voit's .emacs
+:END:
+«If the value of this variable is t, that means when adding a new
+history element, all previous identical elements are deleted.» from:
+http://www.gnu.org/software/emacs/manual/html_node/elisp/Minibuffer-History.html
+
+#+BEGIN_SRC emacs-lisp
+(setq history-delete-duplicates t)
+#+END_SRC
+** Disk usage
+:PROPERTIES:
+:CREATED:  [2019-02-24 So 10:52]
+:END:
+A nice package to show the disk usage
+#+begin_src emacs-lisp
+(use-package disk-usage
+  :ensure t)
+#+end_src
+** filetags.el
+:LOGBOOK:
+- Note taken on [2019-07-07 So 12:00] \\
+  It's now on MELPA
+- Note taken on [2018-07-20 Fr 08:47] \\
+  From Karl Voit's .emacs
+:END:
+
+https://github.com/DerBeutlin/filetags.el provides =filetags-dired-update-tags()= which is
+an Elisp-native re-implementation of [[https://github.com/novoid/filetags/][filetags]]:
+
+It requires =ivy= to work so I used =package-install= to install it from Melpa. Afterwards
+it seems to work. At least on ArchLabs it also requires the =s= package so I'll add that.
+#+BEGIN_SRC emacs-lisp
+;  (use-package s
+;    :demand t)
+;  (require 's)
+#+END_SRC
+
+#+BEGIN_SRC emacs-lisp
+  (use-package filetags
+      :demand t
+      :custom
+      (filetags-load-controlled-vocabulary-from-file t "read CV from .filetags files within same or upper directories")
+  )
+#+END_SRC
+** Golden ratio scrolling
+    Improved scrolling in larger files
+    #+BEGIN_SRC emacs-lisp
+      (use-package golden-ratio-scroll-screen
+        :ensure t
+        :bind(([remap scroll-down-command] . golden-ratio-scroll-screen-down)
+              ([remap scroll-up-command] . golden-ratio-scroll-screen-up)))
+    #+END_SRC
+** Helpful
+:PROPERTIES:
+:CREATED:  [2018-12-17 Mo 10:21]
+:END:
+Helpful is a useful replacement for the standard help buffer see [[https://github.com/Wilfred/helpful][GitHub - Wilfred/helpful: A better Emacs *help* buffer]]
+#+BEGIN_SRC emacs-lisp
+  (use-package helpful
+    :bind (
+           ("C-h f" . helpful-callable)
+           ("C-h v" . helpful-variable)
+           ("C-h k" . helpful-key)))
+#+END_SRC
+** Highlight the current line
+    :LOGBOOK:
+    - Note taken on [2013-07-13 Sa 20:13] \\
+      It needs to be =global-hl-line-mode= otherwise it won't work globally
+    :END:
+    Set a custom face, so we can recognize it from the normal (selection) marking
+    #+begin_src emacs-lisp
+      (global-hl-line-mode 1)
+      (setq hl-line-face 'hl-line)
+    #+end_src
+** Ido-mode
+    :LOGBOOK:
+    - Note taken on [2018-10-01 Mo 21:20] \\
+      Disabled I use ivy instead
+    - Note taken on [2018-05-18 Fr 21:47] \\
+      Added ido-enable-flex-matching t
+    - Note taken on [2018-05-08 Tue 20:47] \\
+      Prefer use-package to defer loading
+    :END:
+    Ido mode is very cool for buffer management. This uses =use-package= rather than
+    =custom.el=.
+    #+begin_src emacs-lisp
+      (use-package ido
+        :config
+        :disabled t
+        (setq ido-create-new-buffer (quote always)
+              ido-enable-flex-matching t)
+        (ido-mode (quote buffers))
+        :ensure nil)
+    #+end_src
+** Ivy
+:PROPERTIES:
+:CREATED:  [2018-07-24 Di 21:32]
+:END:
+Yet another completion tool. From
+https://www.reddit.com/r/emacs/comments/910pga/tip_how_to_use_ivy_and_its_utilities_in_your/
+#+BEGIN_SRC emacs-lisp
+  (use-package ivy
+    :pin MELPA
+    :diminish
+    :bind (("C-c C-r" . ivy-resume)
+           ("C-x B" . ivy-switch-buffer-other-window))
+    :config
+    (setq ivy-count-format "(%d/%d) "
+          ivy-display-style 'fancy
+          ivy-use-virtual-buffers t
+          ivy-virtual-abbreviate 'full)
+    (ivy-mode))
+
+  (use-package counsel
+    :after ivy
+    :ensure t
+    :config (counsel-mode)
+    :bind ("\C-x\C-r" . counsel-recentf))
+
+  (use-package ivy-rich
+    :after ivy
+    :config
+    (setq ivy-rich-path-style 'abbrev)
+    (ivy-rich-mode 1))
+
+  (use-package swiper
+    :after ivy
+    :ensure t
+    :bind (("C-s" . swiper)
+           ("C-r" . swiper)))
+#+END_SRC
+** Keyboard settings
+    :LOGBOOK:
+    - Note taken on [2018-09-17 Mo 10:33] \\
+      C-c C-r is now bound within org so the somment-region keybinding doesn't work anymore
+    - Note taken on [2016-12-11 So 11:56] \\
+      I don't use =org-trello= anymore so back to =occur= binding.
+    - Note taken on [2013-08-18 So 18:30] \\
+      the key binding for =occur= is removed because it's also used by =org-trello=
+    :END:
+    This is a list of special key settings for different functions I use a lot:
+    - have RET indent according to mode
+      #+begin_src emacs-lisp
+      (global-set-key (kbd "RET") 'newline-and-indent)
+      #+end_src
+    - make it easy to call =occur=
+      #+begin_src emacs-lisp
+      (global-set-key "\C-co" 'occur)
+      #+end_src
+    - I found =ibuffer= on
+      http://ergoemacs.org/emacs/emacs_buffer_management.html.
+      This seems better than =buffer-menu=
+      #+begin_src emacs-lisp
+        (defalias 'list-buffers 'ibuffer)
+      #+end_src
+    - I never use =set-fill-column= but want to find a file
+      #+begin_src emacs-lisp
+        (define-key ctl-x-map "f" 'find-file)
+      #+end_src
+    - make it easy to comment a region (C-u C-c C-r uncomments the region)
+      #+begin_src emacs-lisp
+      ;  (global-set-key "\C-c\C-r" 'comment-region)
+      #+end_src
+    - make it easy to go to a line
+      #+begin_src emacs-lisp
+        (global-set-key "\M-g" 'goto-line)
+      #+end_src
+    - easily revert a buffer
+      #+begin_src emacs-lisp
+      (global-set-key "\C-c\C-v" '(lambda () (interactive) (revert-buffer nil t)))
+      #+end_src
+    - Use "y or n" answers instead of full words "yes or no"
+      #+begin_src emacs-lisp
+      (fset 'yes-or-no-p 'y-or-n-p)
+      #+end_src
+** Menu bar
+:PROPERTIES:
+:CREATED:  [2018-10-28 So 11:47]
+:END:
+:LOGBOOK:
+- Note taken on [2018-10-28 So 11:49] \\
+  Cool idea from [[https://github.com/a13/emacs.d][GitHub - a13/emacs.d]]
+:END:
+Most of the time I don't  need the menu bar but it's useful to quickly get to it
+#+BEGIN_SRC emacs-lisp
+  (use-package menu-bar
+    :ensure nil
+    :config
+    (menu-bar-mode -1)
+    :bind
+    ([S-f10] . menu-bar-mode))
+#+END_SRC
+** Minimal
+Replace the mode-line by a single small line. Useful for distraction-free writing
+#+BEGIN_SRC emacs-lisp
+  (use-package minimal
+    :load-path "lisp/minimal"
+    :demand t)
+#+END_SRC
+** Minions
+:PROPERTIES:
+:CREATED:  [2019-02-10 So 17:35]
+:END:
+Another package to reduce clutter in the mode-line from [[https://github.com/tarsius/minions][GitHub - tarsius/minions: A minor-mode menu for the mode line]]
+ #+begin_src emacs-lisp
+   (use-package minions
+     :demand t
+     :init (minions-mode)
+     :config
+     (setq minions-mode-line-lighter "#"))
+ #+end_src
+** Mixed-pitch
+:PROPERTIES:
+:CREATED:  [2020-02-01 Sa 21:38]
+:END:
+This mode makes it easier to have both variable-pitch and fixed-pitch in a buffer
+#+begin_src emacs-lisp
+(use-package mixed-pitch
+  :hook
+  ;; If you want it in all text modes:
+  (text-mode . mixed-pitch-mode))
+#+end_src
+** mode-icons - Show icons instead of mode names
+
+https://github.com/ryuslash/mode-icons
+
+via: https://www.reddit.com/r/emacs/comments/5fjri7/how_to_use_git_logo_in_modeline_instead_of/
+
+This enhances the style of Emacs IMHO.
+
+#+BEGIN_SRC emacs-lisp
+(use-package mode-icons
+  :demand t
+  :config
+  (mode-icons-mode)
+)
+#+END_SRC
+** Modernized Package Menu
+:PROPERTIES:
+:CREATED:  [2018-10-28 So 11:38]
+:END:
+Improves the package menu via [[https://github.com/a13/emacs.d][GitHub - a13/emacs.d]]
+
+#+BEGIN_SRC emacs-lisp
+  (use-package paradox
+    :defer 1
+    :config
+    (setq  paradox-automatically-star nil)
+    (paradox-enable))
+#+END_SRC
+** Moody
+:PROPERTIES:
+:CREATED:  [2019-02-10 So 17:48]
+:END:
+Some eye candy for the modelina from [[https://github.com/tarsius/moody][GitHub - tarsius/moody: Tabs and ribbons for the mode-line]]
+#+begin_src emacs-lisp
+  (when (display-graphic-p)
+    (use-package moody
+      :demand t
+      :config
+      (setq x-underline-at-descent-line t)
+      (moody-replace-mode-line-buffer-identification)
+      (moody-replace-vc-mode)))
+#+end_src
+** msb-Mode
+    :LOGBOOK:
+    - Note taken on [2018-05-07 Mon 21:59] \\
+      Added use-package rather than custom.el
+    :END:
+    From https://www.gnu.org/software/emacs/manual/html_node/emacs/Buffer-Menus.html: MSB
+    global minor mode (“MSB” stands for “mouse select buffer”) provides a different and
+    customizable mouse buffer menu which you may prefer. It replaces the mouse-buffer-menu
+    commands, normally bound to C-Down-mouse-1 and C-<F10>, with its own commands, and
+    also modifies the menu-bar buffer menu.
+
+    #+begin_src emacs-lisp
+    (use-package msb
+    :config
+    (msb-mode 1)
+    :ensure nil)
+    #+end_src
+** No blinking cursor
+    I find a blinking cursor distracting.
+    #+begin_src emacs-lisp
+    (blink-cursor-mode 0)
+    #+end_src
+** Open-with
+:PROPERTIES:
+:CREATED:  [2019-08-16 Fr 18:13]
+:END:
+On Linux I prefer to open PDF externally not within =doc-view=. The easiest way seems to be using =open-with=.
+#+begin_src emacs-lisp
+
+  (cond ((eq system-type 'gnu/linux)
+         (use-package openwith
+           :config
+           (openwith-mode t)
+           (setq openwith-associations '(("\\.pdf\\'" "evince" (file)))))))
+#+end_src
+** Recentf
+    :LOGBOOK:
+    - Note taken on [2018-08-09 Do 22:58] \\
+      Exclude the no-littering directories
+    - Note taken on [2018-05-07 Mon 21:38] \\
+      Added to reduce startup time
+    :END:
+An idea from https://blog.d46.us/advanced-emacs-startup/ to reduce emacs startup time
+#+begin_src emacs-lisp
+  (use-package recentf
+  :config
+  (setq recentf-max-saved-items 40
+        recentf-max-menu-items 15
+        recentf-menu-open-all-flag t
+        ;; disable recentf-cleanup on Emacs start, because it can cause
+        ;; problems with remote files
+        recentf-cleanup-auto 'never)
+  (add-to-list 'recentf-exclude  (expand-file-name package-user-dir))
+  (add-to-list 'recentf-exclude no-littering-var-directory)
+  (add-to-list 'recentf-exclude no-littering-etc-directory)
+  :hook (after-init . recentf-mode))
+#+end_src
+** Saveplace
+    :LOGBOOK:
+    - Note taken on [2018-05-08 Tue 20:59] \\
+      Switch to =use-package=
+    :END:
+    #+begin_src emacs-lisp
+      (use-package saveplace
+        :config
+        (save-place-mode t)
+        :ensure nil)
+    #+end_src
+** Smooth scrolling
+    :LOGBOOK:
+    - Note taken on [2013-11-02 Sa 22:07] \\
+      Newly added
+    :END:
+    Emacs's default scrolling behavior, like a lot of the default Emacs experience, is
+    pretty idiosyncratic. The following snippet makes for a smoother scrolling behavior
+    when using keyboard navigation.
+
+    #+begin_src emacs-lisp
+     (setq redisplay-dont-pause t
+           scroll-margin 1
+           scroll-step 1
+           scroll-conservatively 10000
+           scroll-preserve-screen-position 1)
+   #+end_src
+** Split Windows
+:PROPERTIES:
+:CREATED:  [2021-03-04 Do 21:50]
+:END:
+An improved version to split windows hierarchcially and vertically from [[https://github.com/sje30/emacs][GitHub - sje30/emacs: my notes about emacs]]
+#+begin_src emacs-lisp
+(defun my/split-below-last-buffer (prefix)
+"Split the window above/below and display the previous buffer.
+If prefix arg is provided, show current buffer twice."
+(interactive "p")
+(split-window-below)
+(other-window 1 nil)
+(if (= prefix 1)
+(switch-to-next-buffer)))
+
+(defun my/split-right-last-buffer (prefix)
+"Split the window left/right and display the previous buffer
+If prefix arg is provided, show current buffer twice."
+(interactive "p")
+(split-window-right)
+(other-window 1 nil)
+(if (= prefix 1) (switch-to-next-buffer)))
+
+(global-set-key (kbd "C-x 2")  'my/split-below-last-buffer)
+(global-set-key (kbd "C-x 3")  'my/split-right-last-buffer)
+(setq switch-to-prev-buffer-skip 'this)
+#+end_src
+** Treemacs
+:PROPERTIES:
+:CREATED:  [2019-07-21 So 21:33]
+:END:
+Treemacs makes for a nice sidebar similar to other editors
+#+begin_src emacs-lisp
+(use-package treemacs
+  :ensure t
+  :defer t
+  :init
+  :config
+    (treemacs-follow-mode t)
+    (treemacs-filewatch-mode t)
+    (treemacs-fringe-indicator-mode t)
+  :bind
+  (:map global-map
+        ("M-0"       . treemacs-select-window)
+        ("C-x t 1"   . treemacs-delete-other-windows)
+        ("C-x t t"   . treemacs)
+        ("C-x t B"   . treemacs-bookmark)
+        ("C-x t C-t" . treemacs-find-file)
+        ("C-x t M-t" . treemacs-find-tag)))
+#+end_src
+I like icons in the dired buffer from =treemacs=
+#+BEGIN_SRC emacs-lisp
+(use-package treemacs-icons-dired
+  :after treemacs dired
+  :ensure t
+  :config (treemacs-icons-dired-mode))
+#+END_SRC
+** Undo Tree
+:PROPERTIES:
+:CREATED:  [2020-01-03 Fr 20:58]
+:END:
+Allow tree-semantics for undo operations.
+#+begin_src emacs-lisp
+  (use-package undo-tree
+    :config
+    ;; Always have it on
+    (global-undo-tree-mode)
+
+    ;; Each node in the undo tree should have a timestamp.
+    (setq undo-tree-visualizer-timestamps t)
+
+    ;; Show a diff window displaying changes between undo nodes.
+    (setq undo-tree-visualizer-diff t))
+#+end_src
+** Uniquify
+    Emacs's standard method for making buffer names unique adds <2>, <3>, etc. to the end
+    of (all but one of) the buffers. =uniquify= replaces that behavior, for buffers
+    visiting files and dired buffers, with a uniquification that adds parts of the file
+    name until the buffer names are unique.
+    #+begin_src emacs-lisp
+      (use-package uniquify
+        :config
+        (setq uniquify-buffer-name-style 'forward)
+        :ensure nil)
+    #+end_src
+** Visualise whitespace
+    :LOGBOOK:
+    - Note taken on [2018-05-13 So 21:09] \\
+    Added from http://www.star.bris.ac.uk/bjm/emacs.html
+    :END:
+    This can be useful to find trailing whitespaces. I won't need it often.
+    #+begin_src emacs-lisp
+    (use-package whitespace
+    :diminish whitespace-mode)
+    #+end_src
+** Which-key
+:PROPERTIES:
+:CREATED:  [2018-12-09 So 22:41]
+:END:
+=which-key= provides visual hints for keybindings
+#+BEGIN_SRC emacs-lisp
+(use-package which-key
+:hook (after-init . which-key-mode))
+#+END_SRC
+* Editing related items
+** Abbrevs
+    I use abbrevs mainly to correct common spelling errors
+    #+begin_src emacs-lisp
+    (setq-default abbrev-mode t)     ;; enable abbreviations
+    (setq save-abbrevs 'silently)    ;; save abbreviations upon exiting emacs
+    (if (file-exists-p abbrev-file-name)
+    (quietly-read-abbrev-file))  ;; reads the abbreviations file on startup
+    #+end_src
+** Comment lines
+    :LOGBOOK:
+    - Note taken on [2018-05-26 Sa 19:17] \\
+      From http://www.star.bris.ac.uk/bjm/emacs.html
+    :END:
+    Comment lines easily
+    #+BEGIN_SRC emacs-lisp
+    (use-package comment-dwim-2
+    :bind (("M-;" . comment-dwim-2)))
+    #+END_SRC
+** Company
+    :LOGBOOK:
+    - Note taken on [2015-12-18 Fr 09:18] \\
+      Added as a try
+    :END:
+    Let's try auto-complete in emacs.
+    Accorcing to the docs this should provide company globally and load company mode html
+    backend
+    #+begin_src emacs-lisp
+    (use-package company-web
+    :diminish t
+    :hook (after-init . global-company-mode))
+    #+end_src
+
+    Some more config coming from
+    https://www.reddit.com/r/emacs/comments/8z4jcs/tip_how_to_integrate_company_as_completion/
+    #+BEGIN_SRC emacs-lisp
+      (use-package company
+        :diminish
+        :config
+        (setq company-begin-commands '(self-insert-command)
+              company-minimum-prefix-length 2
+              company-show-numbers t
+              company-tooltip-align-annotations 't)
+        :hook (after-init . global-company-mode))
+    #+END_SRC
+    including nice GUI
+    #+BEGIN_SRC emacs-lisp
+      (use-package company-box
+        :after company
+        :diminish
+        :hook (company-mode . company-box-mode)
+        :init (setq company-box-icons-alist 'company-box-icons-all-the-icons)
+      :config
+      (setq company-box-backends-colors nil)
+      (setq company-box-show-single-candidate t)
+      (setq company-box-max-candidates 50)
+      (with-eval-after-load 'all-the-icons
+        (declare-function all-the-icons-faicon 'all-the-icons)
+        (declare-function all-the-icons-material 'all-the-icons)
+        (setq company-box-icons-all-the-icons
+              `((Unknown . ,(all-the-icons-material "find_in_page" :height 0.9 :v-adjust -0.2))
+                (Text . ,(all-the-icons-faicon "text-width" :height 0.85 :v-adjust -0.05))
+                (Method . ,(all-the-icons-faicon "cube" :height 0.85 :v-adjust -0.05 :face 'all-the-icons-purple))
+                (Function . ,(all-the-icons-faicon "cube" :height 0.85 :v-adjust -0.05 :face 'all-the-icons-purple))
+                (Constructor . ,(all-the-icons-faicon "cube" :height 0.85 :v-adjust -0.05 :face 'all-the-icons-purple))
+                (Field . ,(all-the-icons-faicon "tag" :height 0.85 :v-adjust -0.05 :face 'all-the-icons-lblue))
+                (Variable . ,(all-the-icons-faicon "tag" :height 0.85 :v-adjust -0.05 :face 'all-the-icons-lblue))
+                (Class . ,(all-the-icons-material "settings_input_component" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-orange))
+                (Interface . ,(all-the-icons-material "share" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-lblue))
+                (Module . ,(all-the-icons-material "view_module" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-lblue))
+                (Property . ,(all-the-icons-faicon "wrench" :height 0.85 :v-adjust -0.05))
+                (Unit . ,(all-the-icons-material "settings_system_daydream" :height 0.9 :v-adjust -0.2))
+                (Value . ,(all-the-icons-material "format_align_right" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-lblue))
+                (Enum . ,(all-the-icons-material "storage" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-orange))
+                (Keyword . ,(all-the-icons-material "filter_center_focus" :height 0.9 :v-adjust -0.2))
+                (Snippet . ,(all-the-icons-material "format_align_center" :height 0.9 :v-adjust -0.2))
+                (Color . ,(all-the-icons-material "palette" :height 0.9 :v-adjust -0.2))
+                (File . ,(all-the-icons-faicon "file-o" :height 0.9 :v-adjust -0.05))
+                (Reference . ,(all-the-icons-material "collections_bookmark" :height 0.9 :v-adjust -0.2))
+                (Folder . ,(all-the-icons-faicon "folder-open" :height 0.9 :v-adjust -0.05))
+                (EnumMember . ,(all-the-icons-material "format_align_right" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-lblue))
+                (Constant . ,(all-the-icons-faicon "square-o" :height 0.9 :v-adjust -0.05))
+                (Struct . ,(all-the-icons-material "settings_input_component" :height 0.9 :v-adjust -0.2 :face 'all-the-icons-orange))
+                (Event . ,(all-the-icons-faicon "bolt" :height 0.85 :v-adjust -0.05 :face 'all-the-icons-orange))
+                (Operator . ,(all-the-icons-material "control_point" :height 0.9 :v-adjust -0.2))
+                (TypeParameter . ,(all-the-icons-faicon "arrows" :height 0.85 :v-adjust -0.05))
+                (Template . ,(all-the-icons-material "format_align_center" :height 0.9 :v-adjust -0.2))))))
+    #+END_SRC
+    Some additional settings mentioned on https://github.com/osv/company-web
+    #+begin_src emacs-lisp
+    (setq company-tooltip-limit 20)                      ; bigger popup window
+    (setq company-tooltip-align-annotations 't)          ; align annotations to the right tooltip border
+    (setq company-idle-delay .3)                         ; decrease delay before autocompletion popup shows
+    (setq company-begin-commands '(self-insert-command)) ; start autocompletion only after typing
+    #+end_src
+** Deft
+    :LOGBOOK:
+    - Note taken on [2018-04-29 So 21:08] \\
+      Changed deft-use-filename-as-title to nil which seems to use the filter string
+      Removed the global-key because C-c d to insert date is more convenient
+    - Note taken on [2018-02-26 Mon 22:35] \\
+      Added for a test
+    :END:
+    Deft is an Emacs mode for quickly browsing, filtering, and editing directories of
+    plain text notes, inspired by Notational Velocity.
+
+    I want readable filenames =deft-use-filename-as-title= is =nil= but
+    =deft-use-filter-string-for-filename= is non-nil: In this case the title shown is
+    parsed from the first line of the file while also generating readable filenames for
+    new files based on the filter string. That also gets added as a title into the file.
+    #+begin_src emacs-lisp
+      (use-package deft
+      :init
+      (setq deft-directory (concat cloud-dir "org"))
+      :config
+      (setq deft-default-extension "org"
+      deft-use-filename-as-title nil
+      deft-use-filter-string-for-filename t
+      deft-auto-save-interval 0
+      deft-org-mode-title-prefix t
+      deft-file-naming-rules
+        '((noslash . "-")
+          (nospace . "-")
+          (case-fn . capitalize)))
+      :bind ("C-x C-d" . deft-find-file))
+    #+end_src
+
+Some ideas from [[http://pragmaticemacs.com/category/deft/][deft | Pragmatic Emacs]]
+- make deft behave similar to =org-capture=.
+  advise deft to save window config
+  #+begin_src emacs-lisp
+    (defun bjm-deft-save-windows (orig-fun &rest args)
+      (setq bjm-pre-deft-window-config (current-window-configuration))
+      (apply orig-fun args)
+      )
+
+    (advice-add 'deft :around #'bjm-deft-save-windows)
+  #+end_src
+  function to quit a deft edit cleanly back to pre deft window
+ #+begin_src emacs-lisp
+   (defun bjm-quit-deft ()
+     "Save buffer, kill buffer, kill deft buffer, and restore window config to the way it was before deft was invoked"
+     (interactive)
+     (save-buffer)
+     (kill-this-buffer)
+     (switch-to-buffer "*Deft*")
+     (kill-this-buffer)
+     (when (window-configuration-p bjm-pre-deft-window-config)
+       (set-window-configuration bjm-pre-deft-window-config)
+       )
+     )
+
+   (global-set-key (kbd "C-c q") 'bjm-quit-deft)
+  #+end_src
+** delete-trailing-whitespace before saving
+:LOGBOOK:
+- Note taken on [2018-07-19 Do 18:39] \\
+  From Karl Voit's .emacs
+:END:
+#+BEGIN_SRC emacs-lisp
+(add-hook 'before-save-hook 'delete-trailing-whitespace)
+#+END_SRC
+** Ediff
+:PROPERTIES:
+:CREATED:  [2020-05-01 Fr 21:23]
+:END:
+Some settings that make it more convenient to use =ediff=: split windows horicontally not vertically
+#+begin_src emacs-lisp
+  (setq ediff-diff-options "--binary -w"
+        ediff-split-window-function 'split-window-horizontally
+        ediff-window-setup-function 'ediff-setup-windows-plain)
+#+end_src
+** Grip mode
+#+begin_src emacs-lisp
+(use-package grip-mode
+  :ensure t)
+#+end_src
+** Hippie-expand
+    :LOGBOOK:
+    - Note taken on [2018-05-13 So 21:18] \\
+      Added from http://www.star.bris.ac.uk/bjm/emacs.html
+    :END:
+    This is a useful extension to text expansion
+    #+begin_src emacs-lisp
+      (global-set-key (kbd "M-/") 'hippie-expand)
+      (setq hippie-expand-try-functions-list
+            '(try-expand-dabbrev
+              try-expand-dabbrev-all-buffers
+              try-expand-dabbrev-from-kill
+              try-complete-file-name-partially
+              try-complete-file-name
+              try-expand-all-abbrevs
+              try-expand-list
+              try-expand-line
+              try-complete-lisp-symbol-partially
+              try-complete-lisp-symbol)
+            hippie-expand-dabbrev-as-symbol t
+            hippie-expand-dabbrev-skip-space nil)
+    #+end_src
+** JSON-Navigator
+:PROPERTIES:
+:CREATED:  [2019-12-09 Mo 21:21]
+:END:
+This is a nice visual representation for JSON Files
+#+begin_src emacs-lisp
+(use-package json-navigator)
+#+end_src
+** Nov
+:PROPERTIES:
+:CREATED:  [2019-01-01 Di 18:27]
+:END:
+=nov= is a mode to read epub files in Emacs. It looks nice so I'll try that.
+ #+begin_src emacs-lisp
+   (use-package nov
+     :mode ("\\.epub\\'" . nov-mode)
+     :config
+     (setq nov-text-width 100))
+ #+end_src
+** Olivetti mode
+:PROPERTIES:
+:CREATED:  [2018-10-01 Mo 20:45]
+:END:
+Olivetti provides a nice distraction-free environment.
+#+BEGIN_SRC emacs-lisp
+  (use-package olivetti
+    :custom
+    (olivetti-body-width 0.8)
+    (olivetti-hide-mode-line t)
+    )
+
+#+END_SRC
+** Orgmode
+    :LOGBOOK:
+    - Note taken on [2018-07-10 Di 07:54] \\
+      Added org-expiry to get a CREATED property for new headings
+    - Note taken on [2018-05-03 Do 06:59] \\
+      Going back to org-mode for tasks
+    - Note taken on [2015-04-12 So 16:18] \\
+      Mobile-org removed again
+    - Note taken on [2014-11-13 Do 07:57] \\
+      Another try for MobileOrg
+    - Note taken on [2013-08-18 So 18:32] \\
+      Notes can be added in the LOGBOOK drawer with C-c C-z
+    :END:
+      Finally ;-)-
+*** General settings
+:LOGBOOK:
+- Note taken on [2018-12-27 Do 13:56] \\
+  Saving into a datetree with sufficient number of * produces a proper datetree. I added also the cookie counter to get an overview how many taks I closed on a given day per file.
+- Note taken on [2018-05-04 Fr 10:39] \\
+  Ideas from Bernt Hansen http://doc.norang.ca/org-mode.html
+:END:
+- Where my Org files are stored
+#+BEGIN_SRC emacs-lisp
+  (setq org-directory (concat cloud-dir "org"))
+#+END_SRC
+- Archiving into a datetree
+#+BEGIN_SRC emacs-lisp
+  (setq  org-archive-location "archive.org::datetree/*** %S [/]")
+#+END_SRC
+- Deadlines and due dates are a fact or life
+  By default I want to see deadlines in the agenda 30 days before the due date. The
+  following setting accomplishes this:
+#+begin_src emacs-lisp
+  (setq org-deadline-warning-days 30)
+#+end_src
+- Speed commands
+  I keep forgetting what is possible. [[http://notesyoujustmightwanttosave.blogspot.com/2011/12/org-speed-keys.html][*scratch*: Org Speed Keys]] has an overview.
+#+BEGIN_SRC emacs-lisp
+  (setq  org-fast-tag-selection-single-key 'expert
+         org-special-ctrl-a/e t
+         org-special-ctrl-k t
+         org-use-speed-commands (lambda () (and (looking-at org-outline-regexp) (looking-back "^\\**"))))
+
+#+END_SRC
+- Logging and habits
+  I want to log state changes and also use the =org-habit= module
+#+BEGIN_SRC emacs-lisp
+  (setq  org-habit-graph-column 60
+         org-log-done 'time
+         org-log-into-drawer t
+         org-log-redeadline 'time
+         org-log-reschedule 'time)
+#+END_SRC
+- I like indented mode
+#+BEGIN_SRC emacs-lisp
+  (setq org-startup-indented t
+        org-src-tab-acts-natively t)
+#+END_SRC
+- Refiling
+#+BEGIN_SRC emacs-lisp
+  (setq org-outline-path-complete-in-steps nil
+        org-refile-allow-creating-parent-nodes 'confirm
+        org-refile-targets '((org-agenda-files :maxlevel . 5) (nil :maxlevel . 5))
+        org-refile-use-outline-path 'file)
+#+END_SRC
+- Exclude DONE state tasks from refile targets. Idea from Nasy's  [[https://emacs.nasy.moe/#orgd0483d2][Emacs Configuration]]
+#+begin_src emacs-lisp
+  (defun verify-refile-target ()
+    "Exclude todo keywords with a done state from refile targets."
+    (not (member (nth 2 (org-heading-components)) org-done-keywords)))
+  (setq org-refile-target-verify-function 'verify-refile-target)
+#+end_src
+- I want to be reminded of agenda items
+#+BEGIN_SRC emacs-lisp
+  (org-agenda-to-appt)
+#+END_SRC
+- Quickly insert a block of elisp:
+#+BEGIN_SRC emacs-lisp
+  (add-to-list 'org-structure-template-alist
+               '("el" . "src emacs-lisp"))
+#+END_SRC
+- Use MobileOrg with encryption
+#+BEGIN_SRC emacs-lisp
+  (setq org-mobile-use-encryption t)
+#+END_SRC
+- Some alias for =org-mobile-push= and =org-mobile-pull=:
+#+begin_src emacs-lisp
+  (defalias 'omp 'org-mobile-push)
+  (defalias 'omf 'org-mobile-pull)
+#+end_src
+- Update cookies when killing lines (from [[http://whattheemacsd.com/setup-org.el-01.html][What the .emacs.d!?]])
+#+BEGIN_SRC emacs-lisp
+  (defun myorg-update-parent-cookie ()
+    (when (equal major-mode 'org-mode)
+      (save-excursion
+        (ignore-errors
+          (org-back-to-heading)
+          (org-update-parent-todo-statistics)))))
+
+  (defadvice org-kill-line (after fix-cookies activate)
+    (myorg-update-parent-cookie))
+
+  (defadvice kill-whole-line (after fix-cookies activate)
+    (myorg-update-parent-cookie))
+#+END_SRC
+- Also update cookies after refiling entries (from [[https://lists.gnu.org/archive/html/emacs-orgmode/2012-01/msg00167.html][Re: {O} refiling tasks and counter cookies]])
+#+begin_src emacs-lisp
+  (add-hook
+   'org-after-refile-insert-hook
+    'org-update-parent-todo-statistics)
+#+end_src
+- Always load these modules
+#+BEGIN_SRC emacs-lisp
+  (setq org-modules '(org-habit ol-info org-expiry))
+#+END_SRC
+- Count todo statistics across subtrees
+ #+begin_src emacs-lisp
+   (setq org-hierarchical-todo-statistics nil)
+ #+end_src
+- I want duration in hours/minutes rather than days
+#+begin_src emacs-lisp
+  (setq org-duration-format '((special . h:mm)))
+#+end_src
+- Follow links by pressing ENTER on them
+#+begin_src emacs-lisp
+  (setq org-return-follows-link t)
+#+end_src
+- Adapt indentation
+#+begin_src emacs-lisp
+  (setq org-adapt-indentation t)
+#+end_src
+- Fast tag and todo selection
+#+begin_src emacs-lisp
+  (setq org-fast-todo-selection t
+        org-fast-tag-selection-include-todo nil)
+#+end_src
+- Avoid accidentally editing folded regions, say by adding text after an Org “⋯”.
+#+begin_src emacs-lisp
+  (setq org-catch-invisible-edits 'show)
+#+end_src
+- Hide drawers when cycling. Function found at [[https://github.com/codygman/my-emacs-everywhere/blob/master/emacs-config.org][my-emacs-everywhere/emacs-config.org at master · codygman/my-emacs-everywhere...]]
+#+begin_src emacs-lisp
+  (custom-set-faces
+   '(org-drawer ((t (:weight thin :foreground "#586e75"))))
+   )
+   ;; hide drawers when cycling
+  (defun org-cycle-hide-drawers (state)
+    "Re-hide all drawers after a visibility state change."
+    (when (and (derived-mode-p 'org-mode)
+               (not (memq state '(overview folded contents))))
+      (save-excursion
+        (let* ((globalp (memq state '(contents all)))
+               (beg (if globalp
+                        (point-min)
+                      (point)))
+               (end (if globalp
+                        (point-max)
+                      (if (eq state 'children)
+                          (save-excursion
+                            (outline-next-heading)
+                            (point))
+                        (org-end-of-subtree t)))))
+          (goto-char beg)
+          (while (re-search-forward org-drawer-regexp end t)
+            (save-excursion
+              (beginning-of-line 1)
+              (when (looking-at org-drawer-regexp)
+                (let* ((start (1- (match-beginning 0)))
+                       (limit
+                        (save-excursion
+                          (outline-next-heading)
+                          (point)))
+                       (msg (format
+                             (concat
+                              "org-cycle-hide-drawers:  "
+                              "`:END:`"
+                              " line missing at position %s")
+                             (1+ start))))
+                  (if (re-search-forward "^[ \t]*:END:" limit t)
+                      (outline-flag-region start (point-at-eol) t)
+                    (user-error msg))))))))))
+  (add-hook 'org-cycle-hook 'org-cycle-hide-drawers)
+  (add-hook 'org-mode-hook (lambda ()
+                             (local-set-key (kbd "C-c s") 'org-show-subtree)))
+#+end_src
+*** Add a created property to new entries
+      :PROPERTIES:
+      :CREATED:  [2018-07-09 Mo 23:26]
+      :END:
+      It's a combination of =org-expiry= and a capture hook. =org-expiry= is loaded
+      through =org-modules=.
+      #+BEGIN_SRC emacs-lisp
+      (require 'org-expiry)
+      (org-expiry-insinuate)
+      (setq org-expiry-inactive-timestamps t)
+      (add-hook 'org-capture-before-finalize-hook
+      #'(lambda()
+      (save-excursion
+      (org-back-to-heading)
+      (org-expiry-insert-created))))
+      #+END_SRC
+*** The usual keybindings
+#+begin_src emacs-lisp
+(global-set-key "\C-cl" 'org-store-link)
+(global-set-key "\C-cc" 'org-capture)
+(global-set-key "\C-ca" 'org-agenda)
+(global-set-key "\C-cb" 'org-switchb)
+#+end_src
+*** Adding =imenu= support
+:LOGBOOK:
+- Note taken on [2018-07-18 Mi 07:32] \\
+  Added setting for =org-imenu-depth=.
+- Note taken on [2013-09-04 Mi 12:06] \\
+  Found in the manual
+:END:
+#+begin_src emacs-lisp
+(add-hook 'org-mode-hook
+(lambda () (imenu-add-to-menubar "Imenu")))
+#+end_src
+By default only 2 headings deep are shown which isn't enough when using odd levels only.
+#+BEGIN_SRC emacs-lisp
+(setq org-imenu-depth 5)
+#+END_SRC
+*** Agenda settings
+      :LOGBOOK:
+      - Note taken on [2015-11-08 So 18:54] \\
+        LAPTOP as a todo removed because I don't use it any longer
+      :END:
+      I use a GTD type agenda with all todo keywords and a project list
+      The settings for =org-todo-keywords=, =org-stuck-projects= and
+      =org-agenda-custom-commands=  are in =local.el= since they are both sensitive and
+      system-dependent.
+   #+begin_src emacs-lisp
+      (setq org-agenda-files (concat org-directory "/agenda.txt")
+            org-agenda-date-weekend (quote (:foreground "Yellow" :weight bold))
+            org-agenda-start-on-weekday nil
+            org-agenda-block-separator 9472
+            org-agenda-include-diary t
+            org-agenda-insert-diary-extract-time t
+            org-agenda-remove-tags t
+            org-agenda-show-inherited-tags t
+            org-agenda-skip-deadline-if-done t
+            org-agenda-skip-deadline-prewarning-if-scheduled (quote pre-scheduled) ;;don't show tasks that are scheduled or have deadlines in the
+            org-agenda-skip-scheduled-if-deadline-is-shown t ;;don't give a warning colour to tasks with impending deadlines if they are scheduled to be done
+            org-agenda-skip-scheduled-if-done t           org-agenda-skip-scheduled-if-deadline-is-shown t ;;don't give a warning colour to tasks with impending deadlines if they are scheduled to be done
+            org-agenda-sorting-strategy ;;sort tasks in order of when they are due and then by priority
+            (quote
+             ((agenda time-up habit-down deadline-up priority-down category-keep)
+              (todo priority-down category-keep)
+              (tags priority-down category-keep)
+              (search category-keep)))
+            org-agenda-time-grid
+            (quote
+             ((daily today remove-match)
+              (800 900 1000 1100 1200 1300 1400 1500 1600 1700 1800)
+              "......" "----------------")))
+   #+end_src
+   Use icons in the agenda
+   #+begin_src emacs-lisp
+      (setq org-agenda-category-icon-alist
+         `(("Org" ,(list (all-the-icons-faicon "check-circle")) nil nil :ascent center)
+           ("regularly" ,(list (all-the-icons-faicon "cogs")) nil nil :ascent center)
+           ("buecher" ,(list (all-the-icons-faicon "book")) nil nil :ascent center)
+           ("Journal" ,(list (all-the-icons-faicon "leanpub")) nil nil :ascent center)
+           ("tasks" ,(list (all-the-icons-faicon "check-circle-o")) nil nil :ascent center)
+           ("work" ,(list (all-the-icons-faicon "briefcase")) nil nil :ascent center)
+           ("tree" ,(list (all-the-icons-faicon "tree")) nil nil :ascent center)
+           ("team" ,(list (all-the-icons-faicon "users")) nil nil :ascent center)
+           ))
+   #+end_src
+   I just learned about agenda clockreport. It seems useful to add it to the default agenda view
+   #+begin_src emacs-lisp
+     (setq org-agenda-start-with-clockreport-mode t
+           org-clock-report-include-clocking-task t
+           org-agenda-clockreport-parameter-plist
+           (quote (:link t :maxlevel 4 :fileskip0 t :compact t :narrow 80)))
+   #+end_src
+   The clocking table can be hidden and shown with "R".
+- I also play with =org-super-agenda=
+#+begin_src emacs-lisp
+    (use-package org-super-agenda
+      :demand t
+      :config
+      (org-super-agenda-mode))
+#+end_src
+*** Capture templates
+      :LOGBOOK:
+      - Note taken on [2018-09-27 Do 11:38] \\
+        Separate the capture templates
+      - Note taken on [2018-05-20 So 21:47] \\
+        I moved several settings form =custom.el= here to use the variables from
+        =local.el=
+      :END:
+      Let's try =doct=.
+     #+begin_src emacs-lisp
+       (use-package doct
+         :ensure t
+         ;;recommended: defer until calling doct
+         :commands (doct))
+      #+end_src
+      #+BEGIN_SRC emacs-lisp
+        (setq org-capture-templates
+              (doct `(
+                      (,(format "%s\tCliplink capture task" (all-the-icons-faicon "globe" :face 'all-the-icons-blue :v-adjust 0.01))
+                       :keys "c"
+                       :file "Inbox.org"
+                       :type entry
+                       :template ("* %(org-cliplink-capture)")
+                       :empty-lines 1)
+                      (,(format "%s\tIdeen" (all-the-icons-octicon "file-text" :face 'all-the-icons-cyan :v-adjust 0.01))
+                       :keys "i"
+                       :file "Inbox.org"
+                       :type entry
+                       :template ("* %^{Title}
+          %i"))
+                      (,(format "%s\tJournal" (all-the-icons-faicon "sticky-note-o" :face 'all-the-icons-green :v-adjust 0.01))
+                       :keys "j"
+                       :file "Journal.org"
+                       :datetree t
+                       :type entry
+                       :template ("* %U %?
+          %i"))
+                      (,(format "%s\tLog Time" (all-the-icons-material "timer" :face 'all-the-icons-green :v-adjust 0.01))
+                       :keys "l"
+                       :file "Journal.org"
+                       :datetree t
+                       :type entry
+                       :template ("* %U - %^{Activity}  :TIME:")
+                       :immediate-finish t
+                       :clock-in t
+                       :clock-keep t)
+                      (,(format "%s\tOutcomes for today" (all-the-icons-material "today" :face 'all-the-icons-yellow :v-adjust 0.01))
+                       :keys "o"
+                       :file "Journal.org"
+                       :datetree t
+                       :type entry
+                       :template ("* %U 3 Outcomes for today [%]   :ZIELE:
+%[~/.emacs.d/config/org/.woche.txt]"))
+                      (,(format "%s\tWeekly Review" (all-the-icons-octicon "inbox" :face 'all-the-icons-yellow :v-adjust 0.01))
+                       :keys "r"
+                       :file "Journal.org"
+                       :datetree t
+                       :type entry
+                       :template ("* Weekly Review  :PERSOENLICH:
+%[~/.emacs.d/config/org/.weeklyreview.txt]"))
+                      (,(format "%s\tTasks" (all-the-icons-octicon "checklist" :face 'all-the-icons-yellow :v-adjust 0.01))
+                       :keys "t"
+                       :file "tasks.org"
+                       :headline "Inbox:"
+                       :type entry
+                       :template ("* TODO %^{Task}
+          %i")
+                       :immediate-finish t)
+                      (,(format "%s\tOutcomes for the week" (all-the-icons-faicon "calendar-check-o" :face 'all-the-icons-yellow :v-adjust 0.01))
+                       :keys "w"
+                       :file "Journal.org"
+                       :datetree t
+                       :type entry
+                       :template ("* %U 3 Outcomes for the week [%]   :ZIELE:
+%[~/.emacs.d/config/org/.woche.txt]"))
+                      )
+                    )
+              )
+      #+END_SRC
+*** Org-Babel
+:LOGBOOK:
+      - Note taken on [2018-07-19 Do 18:32] \\
+        Set directory for plantuml fitting to no-littering
+      - Note taken on [2018-05-14 Mo 21:37] \\
+        Added plantuml specific parts
+      - Note taken on [2015-09-24 Do 20:13] \\
+        no longer works so I comment it out
+      - Note taken on [2013-11-02 Sa 22:08] \\
+        Added
+      :END:
+- =ob-plantuml= allows to provide Plantuml diagrams within Orgmode documents. To
+  have only the diagram in the output you need to set =:exports results= in the src
+  block.
+  #+begin_src emacs-lisp
+    (setq org-plantuml-jar-path (concat (expand-file-name no-littering-etc-directory) "org/plantuml.jar"))
+    (add-to-list
+     'org-src-lang-modes '("plantuml" . plantuml))
+    (org-babel-do-load-languages
+     'org-babel-load-languages
+     '((emacs-lisp . t)
+       (plantuml . t)))
+   #+end_src
+- I don't want to be asked about code evaluation
+  #+begin_src emacs-lisp
+    (setq org-confirm-babel-evaluate nil)
+  #+end_src
+- Use syntax highlighting ("fontification") in org-mode source blocks
+  #+begin_src emacs-lisp
+    (setq org-src-fontify-natively 't)
+  #+end_src
+- Automatically refresh inline images
+  From http://emacs.stackexchange.com/questions/3302/live-refresh-of-inline-images-with-org-display-inline-images
+  #+BEGIN_SRC emacs-lisp
+    (defun shk-fix-inline-images ()
+    (when org-inline-image-overlays
+    (org-redisplay-inline-images)))
+
+      (add-hook 'org-babel-after-execute-hook 'shk-fix-inline-images)
+      #+END_SRC
+*** Org-Book
+It's a nice interface to keep my reading list in Org-Mode. I added code to grab input from Manning since I read a lot of their books.
+#+begin_src emacs-lisp
+      (use-package org-books
+        :custom
+         (org-books-url-patterns
+         (quote
+          ((amazon . "^\\(www\\.\\)?amazon\\.")
+           (goodreads . "^\\(www\\.\\)?goodreads\\.com")
+           (isbn . "openlibrary\\.org")
+           (manning . "^\\(www\\.\\)?manning\\."))))
+        :config
+        (setq org-books-file (concat cloud-dir "org/books.org"))
+    )
+  #+end_src
+        (defun org-books-get-details-manning (url)
+          "Get book details from Manning URL."
+          (let* ((page-node (enlive-fetch url))
+                 (title (org-books--clean-str (s-join " " (org-books-get-details-manning-title page-node))))
+                 (author (org-books--clean-str (nth 2 (org-books-get-details-manning-authors page-node)))))
+            (list title author `(("Manning" . ,url)))))
+
+        (defun org-books-get-details-manning-authors (page-node)
+          "Return author names for Manning PAGE-NODE.
+      PAGE-NODE is the return value of `enlive-fetch' on the page url."
+          (mapcar #'enlive-text (enlive-query page-node [.product-authorship])))
+
+        (defun org-books-get-details-manning-title (page-node)
+          "return titles for Manning PAGE_NODE.
+      PAGE-NODE is the return value of `enlive-fetch' on the page url."
+          (mapcar #'enlive-text (enlive-query page-node [.product-title])))
+
+        (defun org-books-get-details (url url-type)
+          "Fetch book details from given URL and its URL-TYPE.
+      Return a list of three items: title (string), author (string) and
+      an alist of properties to be applied to the org entry."
+          (cl-case url-type
+            (amazon (org-books-get-details-amazon url))
+            (goodreads (org-books-get-details-goodreads url))
+            (isbn (org-books-get-details-isbn url))
+            (manning (org-books-get-details-manning url)))))
+#+end_src
+*** Org-Export
+:LOGBOOK:
+- Note taken on [2019-01-01 Di 17:46] \\
+  Org 9.2 changes the structure-template semantics. So Iremevied the ox-hugo template
+- Note taken on [2018-09-27 Do 11:34] \\
+  Move seetings from =custom.el= here
+:END:
+- Some general settings. I don't need tags or todo keyword in the export and also usually
+  no toc. Only headings with certain tags shall be exported
+#+BEGIN_SRC emacs-lisp
+  (setq org-export-exclude-tags '("NA")
+        org-export-select-tags (quote ("PROJEKT" "TOPIC" "EXPORT"))
+        org-export-with-tags nil
+        org-export-with-toc nil
+        org-export-with-todo-keywords nil)
+#+END_SRC
+- Htmlize is required to fontify Org-export
+#+begin_src emacs-lisp
+  (use-package htmlize)
+#+end_src
+- I use =pandoc= for export to various formats
+  #+begin_src emacs-lisp
+    (setq org-pandoc-menu-entry
+          '(
+            (?x "to docx and open." org-pandoc-export-to-docx-and-open)
+            (?X "to docx." org-pandoc-export-to-docx)
+            (?p "to plain and open." org-pandoc-export-to-plain-and-open)
+            (?P "as plain." org-pandoc-export-as-plain)
+            (?h "to html5 and open." org-pandoc-export-to-html5-and-open)
+            (?H "as html5." org-pandoc-export-as-html5)))
+    (use-package ox-pandoc
+      :after org
+;      :config (add-to-list 'org-pandoc-options '(toc . t))
+      :demand t)
+  #+end_src
+  - I use ascii export a lot but want wider text
+    #+begin_src emacs-lisp
+    (setq org-ascii-text-width 150)
+    #+end_src
+  - I want to blog using =hugo=
+#+BEGIN_SRC emacs-lisp
+  (use-package ox-hugo
+    :demand t
+    :after ox)
+#+END_SRC
+*** Org-cliplink
+Easily insert links form the clipboard in org-mode files
+      #+BEGIN_SRC emacs-lisp
+      (use-package org-cliplink
+      :bind ("C-c p" . org-cliplink))
+      #+END_SRC
+*** Org-Clock
+:PROPERTIES:
+:CREATED:  [2018-08-24 Fr 13:43]
+:END:
+I started again to use clocking in Org-mode. Here are the related settings
+#+BEGIN_SRC emacs-lisp
+  (setq org-clock-persist 'clock
+        org-clock-in-resume t
+        org-clock-report-include-clocking-task t
+        org-clock-mode-line-total 'current
+        org-clock-out-remove-zero-time-clocks t
+        org-clock-clocked-in-display 'both
+        org-agenda-clockreport-parameter-plist '(:link t :maxlevel 3))
+  (org-clock-persistence-insinuate)
+  #+END_SRC
+Clock-tables are useful to get an overview over the time spent. I like to have time sorted
+by tags. This is possible with some clever code found here [[https://gist.github.com/ironchicken/6b5424bc2024b3d0a58a8a130f73c2ee][Emacs org-mode dynamic block
+similar to clocktable, but grouped by tagSee: ht...]]
+ #+begin_src emacs-lisp
+(defun clocktable-by-tag/shift-cell (n)
+  (let ((str ""))
+    (dotimes (i n)
+      (setq str (concat str "| ")))
+    str))
+
+(defun clocktable-by-tag/insert-tag (params)
+  (let ((tag (plist-get params :tags)))
+    (insert "|--\n")
+    (insert (format "| %s | *Tag time* |\n" tag))
+    (let ((total 0))
+      (mapcar
+       (lambda (file)
+         (let ((clock-data (with-current-buffer (find-file-noselect file)
+                             (org-clock-get-table-data (buffer-name) params))))
+           (when (> (nth 1 clock-data) 0)
+             (setq total (+ total (nth 1 clock-data)))
+             (insert (format "| | File *%s* | %.2f |\n"
+                             (file-name-nondirectory file)
+                             (/ (nth 1 clock-data) 60.0)))
+             (dolist (entry (nth 2 clock-data))
+               (insert (format "| | . %s%s | %s %.2f |\n"
+                               (org-clocktable-indent-string (nth 0 entry))
+                               (nth 1 entry)
+                               (clocktable-by-tag/shift-cell (nth 0 entry))
+                               (/ (nth 4 entry) 60.0)))))))
+       (org-agenda-files))
+      (save-excursion
+        (re-search-backward "*Tag time*")
+        (org-table-next-field)
+        (org-table-blank-field)
+        (insert (format "*%.2f*" (/ total 60.0)))))
+    (org-table-align)))
+
+(defun org-dblock-write:clocktable-by-tag (params)
+  (insert "| Tag | Headline | Time (h) |\n")
+  (insert "|     |          | <r>  |\n")
+  (let ((tags (plist-get params :tags)))
+    (mapcar (lambda (tag)
+              (clocktable-by-tag/insert-tag (plist-put (plist-put params :match tag) :tags tag)))
+            tags)))
+#+end_src
+*** Org-Download
+:PROPERTIES:
+:CREATED:  [2020-05-17 So 13:29]
+:END:
+Allows to download and insert images in org-buffers
+#+begin_src emacs-lisp
+(use-package org-download
+  :bind ("C-c i" . org-download-yank)
+  :hook (org-mode . org-download-enable)
+  :config
+  (setq org-download-method 'attach))
+#+end_src
+*** Additional link type for TAGS
+      :LOGBOOK:
+      - Note taken on [2018-05-19 Sa 18:55] \\
+        From http://endlessparentheses.com/use-org-mode-links-for-absolutely-anything.html
+      :END:
+      The following code defines links which search your headlines for specific tags.
+#+BEGIN_SRC emacs-lisp
+  (org-add-link-type
+   "tag" 'endless/follow-tag-link)
+
+  (defun endless/follow-tag-link (tag)
+    "Display a list of TODO headlines with tag TAG.
+  With prefix argument, also display headlines without a TODO keyword."
+    (org-tags-view (null current-prefix-arg) tag))
+#+END_SRC
+
+Then, merely write your links as =[[tag:work+phonenumber-boss][Optional Description]\]=q
+*** Toc-Org
+Table of contents in Org Files. After the installation, every time I'm saving an org
+file, the first headline with a :TOC: tag will be updated with the current table of
+contents.
+#+BEGIN_SRC emacs-lisp
+  (use-package toc-org
+    :ensure t
+    :after org
+    :hook (org-mode . toc-org-enable))
+#+END_SRC
+*** Org Beautify
+:PROPERTIES:
+:CREATED:  [2018-08-18 Sa 22:00]
+:END:
+Settings to make org buffers look nicer
+- I like =visual-pitch-mode and =visual-line-mode= for org files.
+  #+BEGIN_SRC emacs-lisp
+    (add-hook 'org-mode-hook
+              (lambda ()
+                (variable-pitch-mode 1)
+                visual-line-mode))
+  #+END_SRC
+- Hiding stars and no emphasis markers displayed
+  #+BEGIN_SRC emacs-lisp
+    (setq org-hide-emphasis-markers t
+          org-fontify-done-headline t
+          org-ellipsis "⤵"
+          org-pretty-entities t
+          org-pretty-entities-include-sub-superscripts nil)
+  #+END_SRC
+- Automatically change list bullets and indent
+  #+begin_src emacs-lisp
+    (setq org-list-demote-modify-bullet
+          (quote (("-" . "+")
+                  ("+" . "*")
+                  ("1." . "-")
+                  ("1)" . "-")
+                  ("A)" . "-")
+                  ("B)" . "-")
+                  ("a)" . "-")
+                  ("b)" . "-")
+                  ("A." . "-")
+                  ("B." . "-")
+                  ("a." . "-")
+                  ("b." . "-")))
+          org-list-indent-offset 2)
+   #+end_src
+- Nice looking bullets
+#+begin_src emacs-lisp
+  (use-package org-superstar
+    :custom
+    (org-superstar-headline-bullets-list '("◉" "◎" "○" "►" "◇"))
+    (org-superstar-item-bullet-alist '((?- . ?•) (?+ . ?➤) (?* . ?◦)))
+  :config
+  (setq org-superstar-cycle-headline-bullets t
+        org-superstar-special-todo-items nil
+        org-superstar-prettify-item-bullets t)
+  :hook (org-mode . org-superstar-mode))
+#+end_src
+- Prettify src blocks
+  Inspired by a comment in [[https://www.reddit.com/r/emacs/comments/9lpupc/i_use_markdown_rather_than_orgmode_for_my_notes/][i use markdown rather than org-mode for my notes : emacs]] I
+  looked at the now builtin mode =prettify-symbols-mode=.. The configuration follows the
+  example given in [[http://endlessparentheses.com/new-in-emacs-25-1-have-prettify-symbols-mode-reveal-the-symbol-at-point.html][New in Emacs 25.1: Have prettify-symbols-mode reveal the symbol at point · En...]].
+  #+BEGIN_SRC emacs-lisp
+    (setq-default prettify-symbols-alist '(("#+BEGIN_SRC" . "✎")
+                                           ("#+END_SRC" . "□")
+                                           ("#+begin_src" . "✎")
+                                           ("#+end_src" . "□")
+                                           (">=" . "≥")
+                                           ("=>" . "⇨")
+                                           ("[ ]" .  "☐")
+                                           ("[X]" . "☑")
+                                           ("[-]" . "?⛞" )
+                                           ("#+TITLE" . "🕮")
+                                           ("#+DATE" . "📆")
+                                           ("#+AUTHOR" . "👤")
+                                           ("#+COLUMNS" . "▓")
+                                           ("#+EMAIL" . "🖂")
+                                           ("#+OPTIONS" . ?⚙)
+                                           ("#+TYP_TODO" . "☑")
+                                           ("#+TAGS" . ?🏷)
+                                           ("#+EXPORT_SELECT_TAGS" . ?🏷)
+                                           ("#+EXPORT_EXCLUDE_TAGS" . ?🏷)
+                                           ("#+DESCRIPTION" . ?🗎)))
+    (setq prettify-symbols-unprettify-at-point 'right-edge)
+    (add-hook 'org-mode-hook 'prettify-symbols-mode)
+  #+END_SRC
+- Strike through done checkboxes is also nice copied from [[https://jft.rocks/emacs/use-unicode-symbol-to-display-org-mode-checkboxes][JFT&#x27;s Notes - Use unicode symbol to display org-mode checkboxes]]
+#+begin_src emacs-lisp
+(defface org-checkbox-done-text
+  '((t (:foreground "#71696A" :strike-through t)))
+  "Face for the text part of a checked org-mode checkbox.")
+
+(font-lock-add-keywords
+ 'org-mode
+ `(("^[ \t]*\\(?:[-+*]\\|[0-9]+[).]\\)[ \t]+\\(\\(?:\\[@\\(?:start:\\)?[0-9]+\\][ \t]*\\)?\\[\\(?:X\\|\\([0-9]+\\)/\\2\\)\\][^\n]*\n\\)"
+    1 'org-checkbox-done-text prepend))
+ 'append)
+#+end_src
+- Some font setting for fixed-pitch
+#+begin_src emacs-lisp
+  (set-face-attribute 'org-table nil :inherit 'fixed-pitch)
+  (add-to-list 'org-emphasis-alist
+               '("*" (:weight bold)))
+#+end_src
+
+- Use pretty-tags
+#+begin_src emacs-lisp
+  (use-package org-pretty-tags
+    :demand t
+    :config
+     (setq org-pretty-tags-surrogate-strings
+           (quote
+            (("TOPIC" . "☆")
+             ("PROJEKT" . "💡")
+             ("SERVICE" . "✍")
+             ("Blog" . "✍")
+             ("music" . "♬")
+             ("security" . "🔥"))))
+     (org-pretty-tags-global-mode))
+#+end_src
+- Use Fancy priorities
+#+begin_src emacs-lisp
+  (use-package org-fancy-priorities
+    :diminish
+    :demand t
+    :defines org-fancy-priorities-list
+    :hook (org-mode . org-fancy-priorities-mode)
+    :config
+    (unless (char-displayable-p ?❗)
+      (setq org-fancy-priorities-list '("HIGH" "MID" "LOW" "OPTIONAL"))))
+#+end_src
+*** Org Outline numbering
+:PROPERTIES:
+:CREATED:  [2018-10-25 Do 20:36]
+:END:
+:LOGBOOK:
+- Note taken on [2018-12-02 So 19:59] \\
+  =org-num= seems more reliable and will be part of org-mode in the future
+:END:
+Display an outline numbering as overlays on Org mode headlines. The numbering matches how
+it would appear when exporting the org file.
+#+BEGIN_SRC emacs-lisp
+  (use-package org-num
+    :ensure nil
+    :after org
+    :hook (org-mode . org-num-mode))
+#+END_SRC
+*** Org-Kanban
+:PROPERTIES:
+:CREATED:  [2019-07-26 Fr 22:19]
+:END:
+Sometimes Kanban boards are useful
+#+begin_src emacs-lisp
+(use-package org-kanban)
+#+end_src
+*** Org-Sidebar
+      :PROPERTIES:
+      :CREATED:  [2019-11-06 Mi 21:54]
+      :END:
+      A nice addition from [[https://github.com/alphapapa/alpha-org/][GitHub - alphapapa/alpha-org: A powerful Org configuration]]
+#+begin_src emacs-lisp
+  (use-package org-sidebar
+    :custom (org-sidebar-tree-side 'left)
+    (org-sidebar-tree-jump-fn 'org-sidebar-tree-jump-source))
+#+end_src
+*** Org-Noter
+:PROPERTIES:
+:CREATED:  [2020-01-14 Tue 17:44]
+:END:
+This package makes it easy to add annotations and comments to PDF files.
+#+begin_src emacs-lisp
+(use-package org-noter)
+#+end_src
+** PDF Tools
+:PROPERTIES:
+:CREATED:  [2020-01-14 Tue 17:43]
+:END:
+This is an awesome package to read an annotate PDF files. Now it even works on Windows.
+#+begin_src emacs-lisp
+(use-package pdf-tools
+  :pin MELPA
+  :config
+  (pdf-tools-install :no-query))
+#+end_src
+*** Org-Noter
+:PROPERTIES:
+:CREATED:  [2020-01-14 Tue 17:44]
+:END:
+This package makes it easy to add annotations and comments to PDF files.
+#+begin_src emacs-lisp
+(use-package org-noter)
+#+end_src
+** PDF Tools
+:PROPERTIES:
+:CREATED:  [2020-01-14 Tue 17:43]
+:END:
+This is an awesome package to read an annotate PDF files. Now it even works on Windows.
+#+begin_src emacs-lisp
+(use-package pdf-tools
+  :pin MELPA
+  :config
+  (pdf-tools-install :no-query))
+#+end_src
+** Todo-txt
+    :LOGBOOK:
+    - Note taken on [2019-10-06 So 18:37] \\
+      I don't use it currently
+    - Note taken on [2018-06-04 Mo 22:16] \\
+      Switched from todotxt to todotxt-mode. The former didn't work as expected and
+      destroyed my todo-File
+    - Note taken on [2016-12-11 So 11:52] \\
+      Added
+    :END:
+    I switched from Google Tasks to todo.txt and will use Emacs on the PC for it.
+    #+begin_src emacs-lisp
+      (use-package todotxt-mode
+        :demand t
+        :disabled
+        :config (setq todotxt-default-file (expand-file-name (concat cloud-dir "Todo/todo.txt"))
+                      todotxt-default-archive-file (expand-file-name (concat cloud-dir "Todo/done.txt")))
+        :bind ("C-c t" . todotxt-add-todo)
+        ("C-c o" . todotxt-open-file))
+    #+end_src
+    Usage:
+
+    TAB             dabbrev-expand
+    x               todotxt-insert-x-maybe-complete
+
+    C-c C-a         todotxt-send-to-reminders
+    C-c C-d         todotxt-group-by-date
+    C-c C-f         Prefix Command
+    C-c C-p         todotxt-group-by-project
+    C-c C-s         Prefix Command
+    C-c C-t         todotxt-group-by-tag
+    C-c a           todotxt-pri-a
+    C-c b           todotxt-pri-b
+    C-c c           todotxt-pri-c
+    C-c d           todotxt-toggle-done
+    C-c n           todotxt-nopri
+    C-c p           todotxt-pri
+    C-c t           todotxt-add-todo
+
+    C-c C-s d       todotxt-sort-by-status
+    C-c C-s n       todotxt-sort-by-creation-date
+    C-c C-s p       todotxt-sort-by-project
+
+    C-c C-f -       todotxt-clear-filter
+    C-c C-f @       todotxt-filter-by-person
+    C-c C-f d       todotxt-filter-by-status
+    C-c C-f p       todotxt-filter-by-project
+    C-c C-f t       todotxt-filter-by-tag
+** ZTree
+:PROPERTIES:
+:CREATED:  [2019-05-12 So 16:34]
+:END:
+A nice directory diff tool
+#+begin_src emacs-lisp
+(use-package ztree)
+#+end_src
+* Programming
+** JS2 Mode
+    :LOGBOOK:
+    - Note taken on [2015-04-12 So 16:23] \\
+      Added for Javascript editing
+    :END:
+    According to Emacswiki =JS2-mode= is an improvement over js.
+  #+begin_src emacs-lisp
+    (use-package js2-mode
+    :config (add-to-list 'auto-mode-alist '("\\.js\\'" . js2-mode))
+    )
+  #+end_src
+** LESS-CSS
+    :LOGBOOK:
+    - Note taken on [2018-02-26 Mo 22:51] \\
+        No longer needed
+    :END:
+    I use it as part of bones development.
+    #+begin_src emacs-lisp
+    ;(require 'less-css-mode)
+    #+end_src
+** PHP Mode
+    #+begin_src emacs-lisp
+      (use-package php-mode
+        :hook (php-mode . (lambda () (define-abbrev php-mode-abbrev-table "ex" "extends"))))
+    #+end_src
+
+    To use abbrev-mode, add lines like this:
+    (add-hook 'php-mode-hook
+        '(lambda () (define-abbrev php-mode-abbrev-table "ex" "extends")))
+** Plantuml
+    Great tool to create UML and other diagrams.
+    #+begin_src emacs-lisp
+    (use-package plantuml-mode
+    :config (setq plantuml-output-type "png")
+    :mode ("\\.puml\\'" . plantuml-mode))
+    #+end_src
+** Powershell
+:PROPERTIES:
+:CREATED:  [2019-03-19 Tue 09:06]
+:END:
+:LOGBOOK:
+- Note taken on [2020-01-25 Sa 19:33] \\
+  I removed MELPA stable. pin is no longer needed
+:END:
+I started to do some powerhsell scripting again. The combined file is nice.
+ #+begin_src emacs-lisp
+   (use-package powershell)
+ #+end_src
+** Python
+:PROPERTIES:
+:CREATED:  [2019-07-07 So 20:51]
+:END:
+I need to do some python programming so I need to have it in Emacs. The config follows [[https://realpython.com/emacs-the-best-python-editor/][Emacs – The Best Python Editor? – Real Python]]
+
+#+begin_src emacs-lisp
+(use-package elpy
+  :ensure t
+  :defer t
+  :init
+  (advice-add 'python-mode :before 'elpy-enable))
+#+end_src
+I want syntax checking as well with flycheck
+#+begin_src emacs-lisp
+  (use-package flycheck
+    :config
+    (setq elpy-modules (delq 'elpy-module-flymake elpy-modules)
+          flycheck-flake8-maximum-line-length 130)
+    :hook
+    (elpy-mode . flycheck-mode))
+#+end_src
+and PEP8 compliance
+#+begin_src emacs-lisp
+  (use-package py-autopep8
+    :hook
+    (elpy-mode . py-autopep8-enable-on-save)
+    )
+#+end_src
+** Rainbow delimiters mode
+:LOGBOOK:
+- Note taken on [2018-09-28 Fr 18:55] \\
+  rainbow-mode itself doesn't work and ins't useful for me. I removed it
+- Note taken on [2018-09-28 Fr 18:42] \\
+  rainbow-delimiters need to be activated for prog-modes
+- Note taken on [2018-05-13 So 21:13] \\
+  Added from http://www.star.bris.ac.uk/bjm/emacs.html
+:END:
+    Can be useful to check brackets etc.
+    #+begin_src emacs-lisp
+      (use-package rainbow-delimiters
+        :init
+        (add-hook 'prog-mode-hook #'rainbow-delimiters-mode))
+    #+end_src
+** Web Mode
+    =web-mode.el= is an autonomous emacs major-mode for editing web templates:
+    HTML documents embedding parts (CSS / JavaScript) and blocks (client / server side). I
+    also use it for editing plain HTML files.
+    #+begin_src emacs-lisp
+    (use-package web-mode
+    :mode (("\\.handlebars\\'" . web-mode) ("\\.html?\\'" . web-mode))
+    )
+    #+end_src
+* Some useful functions and advice
+** Advices for =kill-ring-save= and =kill-region=
+    #+begin_src emacs-lisp
+      (defadvice kill-ring-save (before slick-copy activate compile)
+      "When called interactively with no active region, copy a single
+      line instead."
+      (interactive (if mark-active (list (region-beginning) (region-end)) (message
+      "Copied line") (list (line-beginning-position) (line-beginning-position
+      2)))))
+
+      (defadvice kill-region (before slick-cut activate compile)
+      "When called interactively with no active region, kill a single line instead."
+      (interactive
+        (if mark-active (list (region-beginning) (region-end))
+          (list (line-beginning-position)
+            (line-beginning-position 2)))))
+    #+end_src
+** Use Ido to open recent files
+:LOGBOOK:
+- Note taken on [2018-09-30 So 20:45] \\
+  I'll try ivy/counsel instead for now. The keybinding is set via use-package for counsel
+:END:
+    #+begin_src emacs-lisp
+      (defun ido-recentf-open ()
+        "Use `ido-completing-read' to \\[find-file] a recent file"
+        (interactive)
+        (if (find-file (ido-completing-read "Find recent file: " recentf-list))
+            (message "Opening file...")
+          (message "Aborting")))
+
+ ;    (global-set-key "\C-x\C-r" 'ido-recentf-open)
+    #+end_src
+** Don't ask if a buffer visits a running process during killing emacs. =remq= removes the relevant function
+    :LOGBOOK:
+    - Note taken on [2013-07-13 Sa 20:11] \\
+      Added
+    :END:
+    #+begin_src emacs-lisp
+    (setq kill-buffer-query-functions
+    (remq 'process-kill-buffer-query-function
+    kill-buffer-query-functions))
+    #+end_src
+** Insert date
+    :LOGBOOK:
+    - Note taken on [2018-04-29 So 20:30] \\
+      Added and changed key C-c d from deft to insert-date
+    :END:
+    #+begin_src emacs-lisp
+    (defun insert-date (prefix)
+    "Insert the current date. With prefix-argument, use ISO format. With
+    two prefix arguments, add time."
+    (interactive "P")
+    (let ((format (cond
+    ((not prefix) "%x")
+    ((equal prefix '(4)) "%F")
+    ((equal prefix '(16)) "%F %R"))))
+    (insert (format-time-string format))))
+
+    (global-set-key (kbd "C-c d") 'insert-date)
+    #+end_src
+** Unsplit-line
+:PROPERTIES:
+:CREATED:  [2018-10-25 Do 21:17]
+:END:
+Useful function to join lines from [[http://whattheemacsd.com/key-bindings.el-03.html][What the .emacs.d!?]]
+#+BEGIN_SRC emacs-lisp
+(global-set-key (kbd "M-j")
+                (lambda ()
+                  (interactive)
+                  (join-line -1)))
+#+END_SRC
+** Toggle between horizontal and vertical window split
+:PROPERTIES:
+:CREATED:  [2018-10-25 Do 21:19]
+:END:
+Also from [[http://whattheemacsd.com/buffer-defuns.el-03.html][What the .emacs.d!?]]
+#+BEGIN_SRC emacs-lisp
+(defun toggle-window-split ()
+  (interactive)
+  (if (= (count-windows) 2)
+      (let* ((this-win-buffer (window-buffer))
+             (next-win-buffer (window-buffer (next-window)))
+             (this-win-edges (window-edges (selected-window)))
+             (next-win-edges (window-edges (next-window)))
+             (this-win-2nd (not (and (<= (car this-win-edges)
+                                         (car next-win-edges))
+                                     (<= (cadr this-win-edges)
+                                         (cadr next-win-edges)))))
+             (splitter
+              (if (= (car this-win-edges)
+                     (car (window-edges (next-window))))
+                  'split-window-horizontally
+                'split-window-vertically)))
+        (delete-other-windows)
+        (let ((first-win (selected-window)))
+          (funcall splitter)
+          (if this-win-2nd (other-window 1))
+          (set-window-buffer (selected-window) this-win-buffer)
+          (set-window-buffer (next-window) next-win-buffer)
+          (select-window first-win)
+          (if this-win-2nd (other-window 1))))))
+#+END_SRC
+** Smarter navigation to the beginning of a line
+:PROPERTIES:
+:CREATED:  [2020-05-29 Fri 18:47]
+:END:
+A nice addition from http://emacsredux.com/blog/2013/05/22/smarter-navigation-to-the-beginning-of-a-line/
+#+begin_src emacs-lisp
+(defun smarter-move-beginning-of-line (arg)
+  "Move point back to indentation of beginning of line.
+
+Move point to the first non-whitespace character on this line.
+If point is already there, move to the beginning of the line.
+Effectively toggle between the first non-whitespace character and
+the beginning of the line.
+
+If ARG is not nil or 1, move forward ARG - 1 lines first.  If
+point reaches the beginning or end of the buffer, stop there."
+  (interactive "^p")
+  (setq arg (or arg 1))
+
+  ;; Move lines first
+  (when (/= arg 1)
+    (let ((line-move-visual nil))
+      (forward-line (1- arg))))
+
+  (let ((orig-point (point)))
+    (back-to-indentation)
+    (when (= orig-point (point))
+      (move-beginning-of-line 1))))
+
+;; remap C-a to `smarter-move-beginning-of-line'
+(global-set-key [remap move-beginning-of-line]
+                'smarter-move-beginning-of-line)
+#+end_src
